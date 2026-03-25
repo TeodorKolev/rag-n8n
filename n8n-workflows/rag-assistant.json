@@ -1,5 +1,5 @@
 {
-  "name": "RAG Assistant - Simple POST",
+  "name": "RAG Assistant - Claude Sonnet + Pinecone",
   "nodes": [
     {
       "parameters": {
@@ -167,15 +167,81 @@
     },
     {
       "parameters": {
+        "httpMethod": "POST",
+        "url": "http://backend:8000/api/conversations/log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.query }}"
+            },
+            {
+              "name": "answer",
+              "value": "={{ $json.answer }}"
+            },
+            {
+              "name": "sources",
+              "value": "={{ JSON.stringify($json.sources) }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ JSON.stringify($json.metadata) }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "ignoreHttpStatusErrors": true
+        }
+      },
+      "id": "log-conversation",
+      "name": "Log Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1400, 500]
+    },
+    {
+      "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ $json }}",
-        "options": {}
+        "responseBody": "={{ JSON.stringify($('Format Response').first().json) }}"
       },
       "id": "respond",
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Error handling\nconst error = $input.first().json.error || $input.first().json;\n\nconsole.error('Workflow error:', error);\n\nconst errorResponse = {\n  error: true,\n  message: 'I apologize, but I encountered an error while processing your request. Please try again.',\n  details: error.message || 'Unknown error',\n  timestamp: new Date().toISOString()\n};\n\nreturn errorResponse;"
+      },
+      "id": "error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($input.first().json) }}",
+        "responseCode": 500
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1200, 500]
     }
   ],
   "connections": {
@@ -252,26 +318,21 @@
             "node": "Respond",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Log Conversation",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
     }
   },
-  "pinData": {},
+  "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
   },
-  "staticData": null,
-  "active": false,
-  "tags": [
-    {
-      "createdAt": "2025-08-21T08:00:00.000Z",
-      "updatedAt": "2025-08-21T08:00:00.000Z",
-      "id": "rag-assistant",
-      "name": "RAG Assistant"
-    }
-  ],
-  "triggerCount": 0,
-  "updatedAt": "2025-08-21T08:00:00.000Z",
   "versionId": "1"
 }
