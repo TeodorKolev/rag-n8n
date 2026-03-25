@@ -1,0 +1,336 @@
+{
+  "name": "RAG Assistant - Claude Sonnet + Pinecone",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "rag-assistant-query"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract and validate the user query\nconst body = $input.first().json.body;\nconst query = body.query;\nconst department = body.department || null;\nconst userId = body.userId || 'anonymous';\nconst sessionId = body.sessionId || 'default';\n\nif (!query || query.trim().length === 0) {\n  throw new Error('Query is required');\n}\n\n// Clean and prepare the query\nconst cleanedQuery = query.trim();\n\n// Set up context for the workflow\nreturn {\n  query: cleanedQuery,\n  department: department,\n  userId: userId,\n  sessionId: sessionId,\n  timestamp: new Date().toISOString(),\n  requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`\n};"
+      },
+      "id": "preprocess-query",
+      "name": "Preprocess Query",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "http://python-service:8001/embeddings/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.query }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "generate-embedding",
+      "name": "Generate Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "http://python-service:8001/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $('Preprocess Query').first().json.query }}"
+            },
+            {
+              "name": "top_k",
+              "value": "5"
+            },
+            {
+              "name": "department",
+              "value": "={{ $('Preprocess Query').first().json.department }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "search-pinecone",
+      "name": "Search Pinecone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare context and prompt for Claude\nconst queryData = $('Preprocess Query').first().json;\nconst searchResults = $input.first().json.results;\n\n// Build context from search results\nlet context = '';\nlet sources = [];\n\nif (searchResults && searchResults.length > 0) {\n  context = searchResults.map((result, index) => {\n    sources.push({\n      title: result.title,\n      source: result.source,\n      department: result.department,\n      score: result.score\n    });\n    \n    return `[${index + 1}] ${result.title}\\nSource: ${result.source}\\nDepartment: ${result.department}\\nContent: ${result.content}\\n`;\n  }).join('\\n---\\n\\n');\n} else {\n  context = 'No relevant documents found in the knowledge base.';\n}\n\n// Construct the prompt for Claude\nconst prompt = `You are a helpful enterprise assistant with access to company documents. Answer the user's question based on the provided context.\n\n## Context from Company Documents:\n${context}\n\n## User Question:\n${queryData.query}\n\n## Instructions:\n- Answer based primarily on the provided context\n- If the context doesn't contain enough information, clearly state this\n- Provide specific references to source documents when possible\n- Be concise but comprehensive\n- Use a professional but friendly tone\n- If no relevant context is found, provide a helpful general response and suggest contacting the appropriate department\n\n## Answer:`;\n\nreturn {\n  prompt: prompt,\n  query: queryData.query,\n  context: context,\n  sources: sources,\n  requestId: queryData.requestId,\n  userId: queryData.userId,\n  sessionId: queryData.sessionId,\n  department: queryData.department\n};"
+      },
+      "id": "prepare-claude-prompt",
+      "name": "Prepare Claude Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-api-key",
+              "value": "{{ $env.CLAUDE_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "claude-sonnet-4-20250514"
+            },
+            {
+              "name": "max_tokens",
+              "value": 1000
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"{{ $json.prompt }}\"}]"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "call-claude",
+      "name": "Call Claude Sonnet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Format the final response\nconst promptData = $('Prepare Claude Prompt').first().json;\nconst claudeResponse = $input.first().json;\n\n// Extract Claude's response\nlet answer = '';\nif (claudeResponse.content && claudeResponse.content.length > 0) {\n  answer = claudeResponse.content[0].text;\n} else {\n  answer = 'I apologize, but I was unable to generate a response. Please try again.';\n}\n\n// Prepare the final response\nconst response = {\n  answer: answer,\n  query: promptData.query,\n  sources: promptData.sources,\n  metadata: {\n    requestId: promptData.requestId,\n    userId: promptData.userId,\n    sessionId: promptData.sessionId,\n    department: promptData.department,\n    timestamp: new Date().toISOString(),\n    model: 'claude-3-sonnet-20240229',\n    sourceCount: promptData.sources.length\n  }\n};\n\nreturn response;"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://backend:8000/api/conversations/log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.query }}"
+            },
+            {
+              "name": "answer",
+              "value": "={{ $json.answer }}"
+            },
+            {
+              "name": "sources",
+              "value": "={{ JSON.stringify($json.sources) }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ JSON.stringify($json.metadata) }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "ignoreHttpStatusErrors": true
+        }
+      },
+      "id": "log-conversation",
+      "name": "Log Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1400, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Format Response').first().json) }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Error handling\nconst error = $input.first().json.error || $input.first().json;\n\nconsole.error('Workflow error:', error);\n\nconst errorResponse = {\n  error: true,\n  message: 'I apologize, but I encountered an error while processing your request. Please try again.',\n  details: error.message || 'Unknown error',\n  timestamp: new Date().toISOString()\n};\n\nreturn errorResponse;"
+      },
+      "id": "error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($input.first().json) }}",
+        "responseCode": 500
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1200, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Preprocess Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preprocess Query": {
+      "main": [
+        [
+          {
+            "node": "Generate Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Search Pinecone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Pinecone": {
+      "main": [
+        [
+          {
+            "node": "Prepare Claude Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Claude Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Claude Sonnet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude Sonnet": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "1"
+}
