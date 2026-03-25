@@ -1,70 +1,65 @@
 # RAG Assistant with Claude Sonnet + Pinecone
 
-A comprehensive Retrieval-Augmented Generation system for enterprise knowledge management, designed for Finance, Care, and Sales teams.
+An enterprise knowledge management system that lets teams query internal documents through a chat interface. Upload PDFs, Word docs, and text files — the system processes them into searchable embeddings and uses Claude Sonnet to generate accurate, source-cited answers.
 
-## Architecture Overview
+Built for multi-department use (Finance, Care, Sales, HR) with department-level access filtering so each team only retrieves documents relevant to them.
 
-- **Document Processing**: Python microservice for PDF ingestion, text chunking, and embedding generation
-- **Vector Database**: Pinecone for storing and retrieving document embeddings
-- **LLM Integration**: Claude Sonnet for generating contextual responses
-- **Workflow Automation**: n8n for orchestrating the RAG pipeline
-- **Frontend**: React chat interface with query history and feedback
-- **Backend**: Node.js API with authentication and monitoring
-- **Evaluation**: Built-in metrics for retrieval quality and answer faithfulness
+## How it works
 
-## Project Structure
+1. **Ingest** — Upload documents via the UI or API. A Python microservice extracts text, splits it into chunks, generates embeddings, and stores them in Pinecone.
+2. **Query** — Submit a question via the chat interface. n8n orchestrates the RAG pipeline: embed the query → search Pinecone for relevant chunks → pass context to Claude Sonnet → return an answer with source citations.
+3. **Iterate** — Users can rate responses. Feedback and conversation history are stored for analytics and quality tracking.
 
-```
-├── backend/                 # Node.js API server
-├── frontend/               # React chat interface
-├── python-services/        # Document processing microservices
-├── n8n-workflows/         # Workflow templates
-├── monitoring/            # Evaluation and metrics
-├── docs/                  # Documentation and examples
-└── docker-compose.yml     # Development environment
-```
+## Stack
 
-## Quick Start
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, TypeScript, Vite, Material-UI |
+| Backend API | Node.js, Express, PostgreSQL, Redis |
+| Document processing | Python, FastAPI |
+| Vector database | Pinecone |
+| LLM | Claude Sonnet (Anthropic) |
+| Embeddings | OpenAI `text-embedding-ada-002` |
+| Workflow orchestration | n8n |
+| Infrastructure | Docker Compose |
 
-1. Clone and setup:
+## Quick start
+
 ```bash
-git clone <repo>
-cd pinecone
+# 1. Install dependencies
 npm install
-```
 
-2. Configure environment variables:
-```bash
+# 2. Configure environment
 cp .env.example .env
-# Add your API keys for Pinecone, Claude, OpenAI
-```
+# Fill in: PINECONE_API_KEY, CLAUDE_API_KEY, OPENAI_API_KEY,
+#          POSTGRES_USER, POSTGRES_PASSWORD, JWT_SECRET, PYTHON_SERVICE_API_KEY
+# Generate secrets: openssl rand -hex 64
 
-3. Start services:
-```bash
+# 3. Start all services
 docker-compose up -d
 ```
 
-4. Access the application:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- n8n: http://localhost:5678
+| Service | URL |
+|---|---|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost:8000 |
+| n8n | http://localhost:5678 |
+| Python service | http://localhost:8001 |
 
-## Features
+See [CLAUDE.md](CLAUDE.md) for development commands and architecture details.
 
-- ✅ Multi-format document ingestion (PDF, DOCX, TXT)
-- ✅ Intelligent text chunking and embedding
-- ✅ Semantic search with Pinecone
-- ✅ Context-aware responses with Claude Sonnet
-- ✅ Real-time chat interface
-- ✅ Query history and user feedback
-- ✅ Performance monitoring and evaluation
-- ✅ Automated document re-processing
-- ✅ Role-based access control
+## Project structure
 
-## API Documentation
+```
+backend/           Node.js API (auth, conversations, document routes)
+frontend/          React chat interface
+python-services/   Document processing microservice (FastAPI)
+n8n-workflows/     RAG pipeline and document processing workflow templates
+docs/              API documentation
+docker-compose.yml Full local stack
+.env.example       Environment variable template
+```
 
-See `docs/api.md` for detailed API documentation.
+## API documentation
 
-## Contributing
-
-See `docs/contributing.md` for development guidelines.
+See `docs/api.md` for endpoint reference.

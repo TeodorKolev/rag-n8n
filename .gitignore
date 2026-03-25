@@ -121,6 +121,9 @@ Thumbs.db
 *.swo
 *~
 
+# Claude Code
+CLAUDE.md
+
 # Docker
 .dockerignore
 
