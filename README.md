@@ -48,6 +48,18 @@ docker-compose up -d
 
 See [CLAUDE.md](CLAUDE.md) for development commands and architecture details.
 
+## Importing n8n workflows
+
+After starting the stack, import the workflows into n8n:
+
+1. Open http://localhost:5678 and log in
+2. Go to **Workflows** → **Add workflow**
+3. Click the menu (⋮) → **Import from file**
+4. Import each file from the `n8n-workflows/` folder:
+   - `rag-assistant.json` — RAG query pipeline
+   - `document-processing.json` — document ingestion pipeline
+5. Activate each workflow using the toggle in the top-right corner
+
 ## Project structure
 
 ```
