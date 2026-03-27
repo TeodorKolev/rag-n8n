@@ -1,7 +1,4 @@
 -- Database initialization script for RAG Assistant
--- This script creates the necessary tables and indexes
-
--- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Users table
@@ -19,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Documents table (already created by Python service but adding here for completeness)
+-- Documents table
 CREATE TABLE IF NOT EXISTS documents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     filename VARCHAR(255) NOT NULL,
@@ -63,7 +60,7 @@ CREATE TABLE IF NOT EXISTS feedback (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Processing logs table (already created by Python service)
+-- Processing logs table
 CREATE TABLE IF NOT EXISTS processing_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
@@ -83,7 +80,7 @@ CREATE TABLE IF NOT EXISTS analytics_events (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- API keys table (for service-to-service authentication)
+-- API keys table
 CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
@@ -96,40 +93,18 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create indexes for better performance
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_department ON users(department);
-CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
-
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_documents_department ON documents(department);
-CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at);
-CREATE INDEX IF NOT EXISTS idx_documents_uploaded_by ON documents(uploaded_by);
-
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_session_id ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_department ON conversations(department);
-CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON conversations(created_at);
-
 CREATE INDEX IF NOT EXISTS idx_feedback_conversation_id ON feedback(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback(user_id);
-CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedback(rating);
-
 CREATE INDEX IF NOT EXISTS idx_processing_logs_document_id ON processing_logs(document_id);
-CREATE INDEX IF NOT EXISTS idx_processing_logs_status ON processing_logs(status);
-CREATE INDEX IF NOT EXISTS idx_processing_logs_created_at ON processing_logs(created_at);
 
-CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id ON analytics_events(user_id);
-CREATE INDEX IF NOT EXISTS idx_analytics_events_session_id ON analytics_events(session_id);
-CREATE INDEX IF NOT EXISTS idx_analytics_events_created_at ON analytics_events(created_at);
-
-CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
-CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active);
-
--- Create a trigger to update the updated_at column
+-- updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -138,54 +113,43 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Apply the trigger to relevant tables
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
 CREATE TRIGGER update_documents_updated_at BEFORE UPDATE ON documents
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
 CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Insert default admin user (password: admin123)
--- Note: In production, change this password immediately
+-- Default admin user (password: admin123)
 INSERT INTO users (email, password_hash, first_name, last_name, role, department)
 VALUES (
     'admin@company.com',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', -- admin123
-    'Admin',
-    'User',
-    'admin',
-    'general'
+    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO',
+    'Admin', 'User', 'admin', 'general'
 ) ON CONFLICT (email) DO NOTHING;
 
--- Insert sample users for different departments
 INSERT INTO users (email, password_hash, first_name, last_name, role, department) VALUES
     ('finance@company.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Finance', 'User', 'user', 'finance'),
-    ('care@company.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Care', 'User', 'user', 'care'),
-    ('sales@company.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Sales', 'User', 'user', 'sales'),
-    ('hr@company.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'HR', 'User', 'user', 'hr')
+    ('care@company.com',    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Care',    'User', 'user', 'care'),
+    ('sales@company.com',  '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Sales',   'User', 'user', 'sales'),
+    ('hr@company.com',     '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'HR',      'User', 'user', 'hr')
 ON CONFLICT (email) DO NOTHING;
 
--- Create a view for conversation analytics
+-- Analytics views
 CREATE OR REPLACE VIEW conversation_analytics AS
-SELECT 
+SELECT
     DATE_TRUNC('day', created_at) as date,
     department,
     COUNT(*) as conversation_count,
     AVG(processing_time_ms) as avg_processing_time,
     COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_count,
-    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_count,
-    AVG(CASE WHEN f.rating IS NOT NULL THEN f.rating END) as avg_rating
-FROM conversations c
-LEFT JOIN feedback f ON c.id = f.conversation_id
+    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_count
+FROM conversations
 GROUP BY DATE_TRUNC('day', created_at), department
 ORDER BY date DESC, department;
 
--- Create a view for document processing analytics
 CREATE OR REPLACE VIEW document_analytics AS
-SELECT 
+SELECT
     DATE_TRUNC('day', created_at) as date,
     department,
     COUNT(*) as document_count,

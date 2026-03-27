@@ -123,6 +123,7 @@ Thumbs.db
 
 # Claude Code
 CLAUDE.md
+.claude/
 
 # Docker
 .dockerignore
@@ -133,18 +134,18 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
-requirements.txt
-requirements-dev.txt
-requirements-test.txt
 *.egg-info/
 .pytest_cache/
 .coverage
 htmlcov/
+.mypy_cache/
+.ruff_cache/
 
 # Database
 *.db

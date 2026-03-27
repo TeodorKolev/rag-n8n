@@ -7,7 +7,7 @@ import logging
 from typing import List, Dict, Any
 import PyPDF2
 from docx import Document as DocxDocument
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken
 
 from models import DocumentChunk

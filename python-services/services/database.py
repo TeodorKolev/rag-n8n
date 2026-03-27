@@ -3,7 +3,6 @@ Database service for storing document metadata and processing status
 """
 
 import logging
-import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import asyncpg
@@ -333,6 +332,281 @@ class DatabaseService:
             logger.error(f"Error getting processing logs: {e}")
             raise
     
+    # ------------------------------------------------------------------
+    # User operations
+    # ------------------------------------------------------------------
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        query = """
+        SELECT id, email, password_hash, first_name, last_name, role, department, is_active, last_login
+        FROM users WHERE email = $1;
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, email)
+            return dict(row) if row else None
+
+    async def create_user(
+        self,
+        email: str,
+        password_hash: str,
+        first_name: str,
+        last_name: str,
+        role: str = "user",
+        department: str = "general",
+    ) -> Dict[str, Any]:
+        query = """
+        INSERT INTO users (email, password_hash, first_name, last_name, role, department)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, email, password_hash, first_name, last_name, role, department, is_active;
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, email, password_hash, first_name, last_name, role, department)
+            return dict(row)
+
+    async def update_last_login(self, user_id: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE users SET last_login = NOW() WHERE id = $1;", user_id)
+
+    async def list_users(
+        self,
+        role: Optional[str] = None,
+        department: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        conditions, params, idx = [], [], 0
+
+        if role:
+            idx += 1
+            conditions.append(f"role = ${idx}")
+            params.append(role)
+        if department:
+            idx += 1
+            conditions.append(f"department = ${idx}")
+            params.append(department)
+
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+        idx += 1; params.append(limit)
+        idx += 1; params.append(offset)
+
+        query = f"""
+        SELECT id, email, first_name, last_name, role, department, is_active, last_login, created_at
+        FROM users {where}
+        ORDER BY created_at DESC LIMIT ${idx - 1} OFFSET ${idx};
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+            return [dict(r) for r in rows]
+
+    async def update_user_role(self, user_id: str, role: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE users SET role = $2, updated_at = NOW() WHERE id = $1;", user_id, role)
+
+    # ------------------------------------------------------------------
+    # Conversation operations
+    # ------------------------------------------------------------------
+
+    async def create_conversation(
+        self,
+        user_id: str,
+        query: str,
+        department: str,
+        session_id: Optional[str] = None,
+    ) -> str:
+        sql = """
+        INSERT INTO conversations (user_id, session_id, query, department, status)
+        VALUES ($1::uuid, $2, $3, $4, 'pending')
+        RETURNING id;
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(sql, user_id, session_id, query, department)
+            return str(row["id"])
+
+    async def update_conversation(
+        self,
+        conversation_id: str,
+        answer: Optional[str] = None,
+        sources: Optional[list] = None,
+        metadata: Optional[dict] = None,
+        status: Optional[str] = None,
+        error: Optional[str] = None,
+    ):
+        import json
+        sql = """
+        UPDATE conversations SET
+            answer = COALESCE($2, answer),
+            sources = COALESCE($3::jsonb, sources),
+            metadata = COALESCE($4::jsonb, metadata),
+            status = COALESCE($5, status),
+            error_message = COALESCE($6, error_message),
+            updated_at = NOW()
+        WHERE id = $1::uuid;
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                sql,
+                conversation_id,
+                answer,
+                json.dumps(sources) if sources is not None else None,
+                json.dumps(metadata) if metadata is not None else None,
+                status,
+                error,
+            )
+
+    async def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        sql = """
+        SELECT id, user_id, session_id, query, answer, department, sources, metadata,
+               status, error_message, created_at, updated_at
+        FROM conversations WHERE id = $1::uuid;
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(sql, conversation_id)
+            return dict(row) if row else None
+
+    async def get_conversation_history(
+        self,
+        user_id: Optional[str],
+        limit: int = 20,
+        offset: int = 0,
+        department: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        conditions, params, idx = [], [], 0
+
+        if user_id:
+            idx += 1
+            conditions.append(f"user_id = ${idx}::uuid")
+            params.append(user_id)
+        if session_id:
+            idx += 1
+            conditions.append(f"session_id = ${idx}")
+            params.append(session_id)
+        if department:
+            idx += 1
+            conditions.append(f"department = ${idx}")
+            params.append(department)
+
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+        idx += 1; params.append(limit)
+        idx += 1; params.append(offset)
+
+        sql = f"""
+        SELECT id, user_id, session_id, query, answer, department, status, created_at
+        FROM conversations {where}
+        ORDER BY created_at DESC LIMIT ${idx - 1} OFFSET ${idx};
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
+            return [dict(r) for r in rows]
+
+    async def get_session_conversations(
+        self, session_id: str, limit: int = 50, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        sql = """
+        SELECT id, session_id, query, answer, department, status, created_at
+        FROM conversations WHERE session_id = $1
+        ORDER BY created_at DESC LIMIT $2 OFFSET $3;
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, session_id, limit, offset)
+            return [dict(r) for r in rows]
+
+    async def delete_conversation(self, conversation_id: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE conversations SET status = 'failed', updated_at = NOW() WHERE id = $1::uuid;",
+                conversation_id,
+            )
+
+    async def submit_feedback(
+        self,
+        conversation_id: str,
+        user_id: Optional[str],
+        rating: int,
+        feedback_text: Optional[str] = None,
+    ):
+        if not user_id:
+            return  # feedback requires a real user in the schema
+        sql = """
+        INSERT INTO feedback (conversation_id, user_id, rating, feedback_text)
+        VALUES ($1::uuid, $2::uuid, $3, $4)
+        ON CONFLICT DO NOTHING;
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(sql, conversation_id, user_id, rating, feedback_text)
+
+    async def get_analytics_summary(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        department: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        conditions, params, idx = [], [], 0
+
+        if start_date:
+            idx += 1
+            conditions.append(f"created_at >= ${idx}")
+            params.append(start_date)
+        if end_date:
+            idx += 1
+            conditions.append(f"created_at <= ${idx}")
+            params.append(end_date)
+        if department:
+            idx += 1
+            conditions.append(f"department = ${idx}")
+            params.append(department)
+
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+        sql = f"""
+        SELECT
+            COUNT(*) as total,
+            COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
+            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+            AVG(processing_time_ms) as avg_processing_time_ms
+        FROM conversations {where};
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(sql, *params)
+            return dict(row) if row else {}
+
+    # ------------------------------------------------------------------
+    # Admin log queries
+    # ------------------------------------------------------------------
+
+    async def get_processing_logs_filtered(
+        self,
+        level: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        conditions, params, idx = [], [], 0
+
+        if level:
+            idx += 1
+            conditions.append(f"status = ${idx}")
+            params.append(level)
+        if start:
+            idx += 1
+            conditions.append(f"created_at >= ${idx}")
+            params.append(start)
+        if end:
+            idx += 1
+            conditions.append(f"created_at <= ${idx}")
+            params.append(end)
+
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+        idx += 1; params.append(limit)
+
+        sql = f"""
+        SELECT id, document_id, status, message, processing_time_ms, created_at
+        FROM processing_logs {where}
+        ORDER BY created_at DESC LIMIT ${idx};
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
+            return [dict(r) for r in rows]
+
     async def get_stats(self) -> Dict[str, Any]:
         """Get database statistics"""
         

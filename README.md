@@ -6,7 +6,7 @@ Built for multi-department use (Finance, Care, Sales, HR) with department-level 
 
 ## How it works
 
-1. **Ingest** — Upload documents via the UI or API. A Python microservice extracts text, splits it into chunks, generates embeddings, and stores them in Pinecone.
+1. **Ingest** — Upload documents via the UI or API. The Python FastAPI service saves the file, creates a DB record, and either enqueues an SQS job (production) or processes it in the background (local dev). Text is extracted, split into chunks, embedded, and stored in Pinecone.
 2. **Query** — Submit a question via the chat interface. n8n orchestrates the RAG pipeline: embed the query → search Pinecone for relevant chunks → pass context to Claude Sonnet → return an answer with source citations.
 3. **Iterate** — Users can rate responses. Feedback and conversation history are stored for analytics and quality tracking.
 
@@ -15,36 +15,35 @@ Built for multi-department use (Finance, Care, Sales, HR) with department-level 
 | Layer | Technology |
 |---|---|
 | Frontend | React 18, TypeScript, Vite, Material-UI |
-| Backend API | Node.js, Express, PostgreSQL, Redis |
-| Document processing | Python, FastAPI |
+| Backend API | Python, FastAPI, PostgreSQL, Redis |
+| Document processing | Python, FastAPI, SQS worker (production) |
 | Vector database | Pinecone |
 | LLM | Claude Sonnet (Anthropic) |
 | Embeddings | OpenAI `text-embedding-ada-002` |
 | Workflow orchestration | n8n |
-| Infrastructure | Docker Compose |
+| Infrastructure | Docker Compose / AWS Lambda (production) |
 
 ## Quick start
 
 ```bash
-# 1. Install dependencies
-npm install
-
-# 2. Configure environment
+# 1. Configure environment
 cp .env.example .env
 # Fill in: PINECONE_API_KEY, CLAUDE_API_KEY, OPENAI_API_KEY,
-#          POSTGRES_USER, POSTGRES_PASSWORD, JWT_SECRET, PYTHON_SERVICE_API_KEY
+#          POSTGRES_USER, POSTGRES_PASSWORD, JWT_SECRET,
+#          PYTHON_SERVICE_API_KEY, N8N_BASIC_AUTH_USER, N8N_BASIC_AUTH_PASSWORD
 # Generate secrets: openssl rand -hex 64
 
-# 3. Start all services
+# 2. Start all services
 docker-compose up -d
 ```
 
 | Service | URL |
 |---|---|
 | Frontend | http://localhost:3000 |
-| Backend API | http://localhost:8000 |
+| Backend API + Docs | http://localhost:8001 / http://localhost:8001/docs |
 | n8n | http://localhost:5678 |
-| Python service | http://localhost:8001 |
+
+Default login: `admin@company.com` / `admin123`
 
 See [CLAUDE.md](CLAUDE.md) for development commands and architecture details.
 
@@ -63,15 +62,18 @@ After starting the stack, import the workflows into n8n:
 ## Project structure
 
 ```
-backend/           Node.js API (auth, conversations, document routes)
 frontend/          React chat interface
-python-services/   Document processing microservice (FastAPI)
-n8n-workflows/     RAG pipeline and document processing workflow templates
-docs/              API documentation
+python-services/   FastAPI backend (auth, conversations, documents, embeddings)
+  routers/         API route handlers (auth, conversations, admin)
+  services/        Business logic (database, n8n, cache, S3, SQS, Pinecone)
+  middleware/       JWT auth dependencies
+  worker/          AWS Lambda SQS worker for document processing
+  db/              PostgreSQL schema (init.sql)
+n8n-workflows/     RAG pipeline workflow templates
 docker-compose.yml Full local stack
 .env.example       Environment variable template
 ```
 
 ## API documentation
 
-See `docs/api.md` for endpoint reference.
+Interactive docs available at http://localhost:8001/docs when the stack is running.
