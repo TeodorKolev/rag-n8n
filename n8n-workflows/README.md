@@ -6,9 +6,12 @@ Two workflows orchestrate the RAG pipeline.
 
 ### RAG Assistant (`rag-assistant.json`)
 
-Handles user queries end-to-end: validates input → generates embedding → searches Pinecone → calls Claude Sonnet → logs conversation → returns response.
+Handles user queries end-to-end: validates input → generates embedding → searches Pinecone → calls Claude Sonnet → returns response.
 
-**Webhook URL**: `http://localhost:5678/webhook/rag-assistant-query`
+Called by the Python FastAPI backend at `POST /api/conversations/query`.
+
+**Webhook URL**: `http://n8n:5678/webhook/query` (internal Docker network)
+**External URL**: `http://localhost:5678/webhook/query`
 
 **Request**:
 ```json
@@ -16,7 +19,8 @@ Handles user queries end-to-end: validates input → generates embedding → sea
   "query": "How do I process a refund?",
   "department": "finance",
   "userId": "user123",
-  "sessionId": "session456"
+  "sessionId": "session456",
+  "conversationId": "conv-uuid"
 }
 ```
 
@@ -24,7 +28,6 @@ Handles user queries end-to-end: validates input → generates embedding → sea
 ```json
 {
   "answer": "To process a refund...",
-  "query": "How do I process a refund?",
   "sources": [
     {
       "title": "Refund Policy",
@@ -34,13 +37,9 @@ Handles user queries end-to-end: validates input → generates embedding → sea
     }
   ],
   "metadata": {
-    "requestId": "req_1234567890_abc123",
-    "userId": "user123",
-    "sessionId": "session456",
-    "department": "finance",
-    "timestamp": "2024-01-01T12:00:00.000Z",
     "model": "claude-sonnet-4-20250514",
-    "sourceCount": 1
+    "sourceCount": 1,
+    "timestamp": "2024-01-01T12:00:00.000Z"
   }
 }
 ```
@@ -50,6 +49,8 @@ Handles user queries end-to-end: validates input → generates embedding → sea
 ### Document Processing (`document-processing.json`)
 
 Receives a document processing request and forwards it to the Python service for text extraction, chunking, and embedding generation.
+
+> **Note**: In production (serverless), document processing is handled directly by the SQS Lambda worker (`python-services/worker/handler.py`) and this workflow is not used.
 
 **Webhook URL**: `http://localhost:5678/webhook/process-document`
 
@@ -75,14 +76,15 @@ Receives a document processing request and forwards it to the Python service for
 2. Go to **Workflows** → **Import from file**
 3. Upload `rag-assistant.json` and `document-processing.json`
 4. Ensure `CLAUDE_API_KEY` is set in the n8n environment (used via `{{ $env.CLAUDE_API_KEY }}`)
+5. Activate each workflow with the toggle in the top-right corner
 
 ## Test
 
 ```bash
 # Test RAG Assistant
-curl -X POST http://localhost:5678/webhook/rag-assistant-query \
+curl -X POST http://localhost:5678/webhook/query \
   -H "Content-Type: application/json" \
-  -d '{"query": "What is our return policy?", "department": "sales", "userId": "test_user"}'
+  -d '{"query": "What is our return policy?", "department": "sales", "userId": "test_user", "sessionId": "test", "conversationId": "test"}'
 
 # Test Document Processing
 curl -X POST http://localhost:5678/webhook/process-document \

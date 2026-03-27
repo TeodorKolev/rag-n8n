@@ -3,6 +3,8 @@ Python Document Processing Service for RAG Assistant
 Handles document ingestion, preprocessing, embedding generation, and Pinecone storage.
 """
 
+import asyncio
+import json
 import os
 import logging
 from typing import Optional
@@ -10,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -17,8 +20,10 @@ from services.document_processor import DocumentProcessor
 from services.embedding_service import EmbeddingService
 from services.pinecone_service import PineconeService
 from services.database import DatabaseService
+from services import cache_service
 from config import settings
 from models import DocumentMetadata, ProcessingStatus, EmbeddingRequest, QueryRequest
+from routers import auth, conversations, admin
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -67,18 +72,19 @@ async def lifespan(app: FastAPI):
         raise
     
     yield
-    
+
     # Cleanup on shutdown
     logger.info("Shutting down services...")
     if database_service:
         await database_service.close()
+    await cache_service.close()
 
 
 app = FastAPI(
-    title="RAG Document Processing Service",
-    description="Microservice for document processing, embedding generation, and vector storage",
-    version="1.0.0",
-    lifespan=lifespan
+    title="RAG Assistant API",
+    description="Backend API for the RAG Assistant — document processing, conversations, auth",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 # Add CORS middleware
@@ -87,9 +93,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
+
+# Register routers
+app.include_router(auth.router, prefix="/api")
+app.include_router(conversations.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 
 async def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
@@ -135,36 +146,51 @@ async def upload_document(
         )
     
     try:
-        # Save uploaded file
-        upload_path = f"uploads/{file.filename}"
-        with open(upload_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
-        
-        # Create document metadata
+        content = await file.read()
+
+        # Create document metadata record
         metadata = DocumentMetadata(
             filename=file.filename,
             title=title or file.filename,
             source=source or "upload",
             department=department,
-            file_path=upload_path,
+            file_path="",  # filled in below
             file_size=len(content),
-            status=ProcessingStatus.PENDING
+            status=ProcessingStatus.PENDING,
         )
-        
-        # Store metadata in database
+
         doc_id = await database_service.create_document(metadata)
-        
-        # Process document in background
-        background_tasks.add_task(process_document_background, doc_id, upload_path, metadata)
-        
+
+        if settings.s3_bucket and settings.sqs_queue_url:
+            # Production path: store file in S3, enqueue SQS job
+            from services import s3_service, sqs_service
+            s3_key = f"uploads/{doc_id}/{file.filename}"
+            await s3_service.upload_file(content, s3_key, file.content_type or "application/octet-stream")
+            sqs_service.enqueue_document(
+                document_id=doc_id,
+                s3_key=s3_key,
+                metadata={
+                    "filename": file.filename,
+                    "title": title or file.filename,
+                    "source": source or "upload",
+                    "department": department,
+                },
+            )
+        else:
+            # Local dev path: save to disk and process in-process
+            upload_path = f"uploads/{file.filename}"
+            with open(upload_path, "wb") as buf:
+                buf.write(content)
+            metadata.file_path = upload_path
+            background_tasks.add_task(process_document_background, doc_id, upload_path, metadata)
+
         return {
             "document_id": doc_id,
             "filename": file.filename,
             "status": "uploaded",
-            "message": "Document uploaded successfully. Processing started in background."
+            "message": "Document uploaded successfully. Processing started in background.",
         }
-        
+
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -305,6 +331,57 @@ async def get_document_status(document_id: str, _: None = Depends(require_api_ke
     except Exception as e:
         logger.error(f"Error getting document status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/documents/{document_id}/status/stream")
+async def stream_document_status(document_id: str):
+    """SSE stream that pushes document status updates until processing completes or fails.
+
+    The frontend connects once and receives events until the document reaches
+    'completed' or 'failed', at which point the stream closes.
+    """
+
+    async def event_generator():
+        terminal = {"completed", "failed"}
+        poll_interval = 2  # seconds between DB polls
+
+        while True:
+            if not database_service:
+                yield f"event: error\ndata: {json.dumps({'detail': 'Service not ready'})}\n\n"
+                return
+
+            try:
+                doc = await database_service.get_document(document_id)
+                if not doc:
+                    yield f"event: error\ndata: {json.dumps({'detail': 'Document not found'})}\n\n"
+                    return
+
+                payload = {
+                    "document_id": document_id,
+                    "status": doc.status.value if hasattr(doc.status, "value") else doc.status,
+                    "chunk_count": doc.chunk_count,
+                    "error_message": doc.error_message,
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+
+                if payload["status"] in terminal:
+                    return
+
+            except Exception as e:
+                logger.error(f"SSE error for document {document_id}: {e}")
+                yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+                return
+
+            await asyncio.sleep(poll_interval)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
 
 
 @app.get("/documents")
@@ -452,11 +529,23 @@ async def reprocess_document(document_id: str, background_tasks: BackgroundTasks
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# AWS Lambda entry point (API Gateway → Mangum → FastAPI)
+# The SQS worker uses its own handler in worker/handler.py
+# ---------------------------------------------------------------------------
+try:
+    from mangum import Mangum
+    lambda_handler = Mangum(app, lifespan="off")
+except ImportError:
+    # mangum not available in local dev without the package installed
+    lambda_handler = None
+
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8001,
         reload=True,
-        log_level="info"
+        log_level="info",
     )
