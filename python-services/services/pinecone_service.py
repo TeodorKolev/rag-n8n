@@ -54,7 +54,7 @@ class PineconeService:
                 # Check if existing index has correct dimensions
                 try:
                     index_stats = await asyncio.to_thread(self.client.describe_index, self.index_name)
-                    if index_stats.dimension != 768:
+                    if index_stats.dimension != 1536:
                         logger.info(f"Deleting existing index with wrong dimensions: {self.index_name}")
                         await asyncio.to_thread(self.client.delete_index, self.index_name)
                         # Wait for deletion to complete
@@ -73,7 +73,7 @@ class PineconeService:
                 await asyncio.to_thread(
                     self.client.create_index,
                     name=self.index_name,
-                    dimension=768,  # sentence-transformers dimensions
+                    dimension=1536,  # OpenAI text-embedding-ada-002
                     metric="cosine",
                     spec=ServerlessSpec(
                         cloud="aws",

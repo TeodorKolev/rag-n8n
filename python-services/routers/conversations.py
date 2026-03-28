@@ -4,14 +4,16 @@ Conversation routes — RAG queries and history
 
 import base64
 import logging
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, conint, constr
 
 from middleware.auth import get_optional_user
 from services import cache_service, n8n_service
 from services.database import DatabaseService
+from limiter import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,9 @@ def get_db() -> DatabaseService:
 # ---------- Routes ----------
 
 @router.post("/query")
+@limiter.limit("30/minute")
 async def query(
+    request: Request,
     body: QueryRequest,
     user: Optional[dict] = Depends(get_optional_user),
     db: DatabaseService = Depends(get_db),
@@ -191,7 +195,9 @@ async def analytics_summary(
     department: Optional[str] = None,
     db: DatabaseService = Depends(get_db),
 ):
-    from datetime import datetime
-    start = datetime.fromisoformat(startDate) if startDate else None
-    end = datetime.fromisoformat(endDate) if endDate else None
+    try:
+        start = datetime.fromisoformat(startDate) if startDate else None
+        end = datetime.fromisoformat(endDate) if endDate else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use ISO 8601 (e.g. 2024-01-01T00:00:00)")
     return await db.get_analytics_summary(start_date=start, end_date=end, department=department)

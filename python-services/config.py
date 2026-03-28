@@ -4,6 +4,7 @@ Configuration settings for the document processing service
 
 import os
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from typing import Optional
 
 
@@ -25,7 +26,7 @@ class Settings(BaseSettings):
     # Document Processing
     max_chunk_size: int = 1000
     chunk_overlap: int = 200
-    embedding_model: str = "sentence-transformers/all-mpnet-base-v2"
+    embedding_model: str = "text-embedding-ada-002"
     
     # Application
     environment: str = "development"
@@ -62,6 +63,18 @@ class Settings(BaseSettings):
     s3_bucket: Optional[str] = None        # required in production
     sqs_queue_url: Optional[str] = None    # required in production
     
+    @model_validator(mode="after")
+    def check_production_secrets(self) -> "Settings":
+        """Fail fast if insecure defaults are used in production."""
+        if self.environment == "production":
+            if self.jwt_secret == "change-me-in-production":
+                raise ValueError("JWT_SECRET must be set to a strong random value in production")
+            if self.n8n_basic_auth_password == "password":
+                raise ValueError("N8N_BASIC_AUTH_PASSWORD must be set in production")
+            if self.python_service_api_key in ("", "changeme"):
+                raise ValueError("PYTHON_SERVICE_API_KEY must be set in production")
+        return self
+
     class Config:
         env_file = ".env"
         case_sensitive = False

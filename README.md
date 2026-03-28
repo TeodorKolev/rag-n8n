@@ -4,6 +4,75 @@ An enterprise knowledge management system that lets teams query internal documen
 
 Built for multi-department use (Finance, Care, Sales, HR) with department-level access filtering so each team only retrieves documents relevant to them.
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Docker Network                             │
+│                                                                     │
+│  ┌──────────────┐     ┌──────────────────────────────────────────┐  │
+│  │   Frontend   │────▶│          Python FastAPI :8001            │  │
+│  │  React :3000 │     │  auth · conversations · documents · admin│  │
+│  └──────────────┘     └───────┬──────────────────────┬───────────┘  │
+│                               │                      │              │
+│                    ┌──────────▼────────┐   ┌─────────▼──────────┐  │
+│                    │   n8n  :5678      │   │  PostgreSQL :5433   │  │
+│                    │  RAG pipeline     │   │  Redis      :6380   │  │
+│                    └──────────┬────────┘   └────────────────────┘  │
+│                               │                                     │
+└───────────────────────────────┼─────────────────────────────────────┘
+                                │
+              ┌─────────────────┼──────────────────┐
+              │                 │                  │
+              ▼                 ▼                  ▼
+        ┌──────────┐    ┌──────────────┐   ┌─────────────┐
+        │ Pinecone │    │ Claude Sonnet│   │  OpenAI API │
+        │ (vectors)│    │    (LLM)     │   │ (embeddings)│
+        └──────────┘    └──────────────┘   └─────────────┘
+```
+
+### Document ingestion flow
+
+```
+User uploads file
+      │
+      ▼
+FastAPI /documents/upload
+      │  saves file + creates DB record (status: pending)
+      ▼
+Background worker (local) / SQS Lambda (production)
+      │
+      ├─ extract text
+      ├─ chunk (1000 chars, 200 overlap)
+      ├─ embed via OpenAI text-embedding-ada-002
+      └─ upsert vectors to Pinecone  ──▶  status: completed
+```
+
+### Query flow
+
+```
+User sends question
+      │
+      ▼
+FastAPI /conversations/query
+      │  checks Redis cache
+      ▼
+n8n webhook
+      │
+      ├─ embed question (OpenAI)
+      ├─ search Pinecone (vector + department filter)
+      ├─ build prompt with retrieved chunks
+      └─ call Claude Sonnet
+            │
+            ▼
+      answer + source citations
+            │
+      stored in PostgreSQL + cached in Redis (5 min TTL)
+            │
+            ▼
+      returned to user
+```
+
 ## How it works
 
 1. **Ingest** — Upload documents via the UI or API. The Python FastAPI service saves the file, creates a DB record, and either enqueues an SQS job (production) or processes it in the background (local dev). Text is extracted, split into chunks, embedded, and stored in Pinecone.
@@ -45,7 +114,7 @@ docker-compose up -d
 
 Default login: `admin@company.com` / `admin123`
 
-See [CLAUDE.md](CLAUDE.md) for development commands and architecture details.
+See [CLAUDE.md](CLAUDE.md) for architecture details and per-service development commands.
 
 ## Importing n8n workflows
 
