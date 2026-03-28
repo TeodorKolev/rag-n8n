@@ -6,9 +6,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt as _bcrypt
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from config import settings
@@ -19,7 +20,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _hash_password(password: str) -> str:
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
 
 VALID_DEPARTMENTS = {"finance", "care", "sales", "hr", "general"}
 VALID_ROLES = {"user", "admin", "manager"}
@@ -96,7 +103,7 @@ def get_db() -> DatabaseService:
 @router.post("/login", response_model=AuthResponse)
 async def login(body: LoginRequest, db: DatabaseService = Depends(get_db)):
     user = await db.get_user_by_email(body.email)
-    if not user or not pwd_context.verify(body.password, user["password_hash"]):
+    if not user or not _verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     if not user.get("is_active", True):
@@ -120,7 +127,7 @@ async def register(body: RegisterRequest, db: DatabaseService = Depends(get_db))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists")
 
-    password_hash = pwd_context.hash(body.password)
+    password_hash = _hash_password(body.password)
     user = await db.create_user(
         email=body.email,
         password_hash=password_hash,

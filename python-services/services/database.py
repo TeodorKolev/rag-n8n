@@ -248,7 +248,7 @@ class DatabaseService:
                 documents = []
                 for result in results:
                     documents.append({
-                        "id": str(result['id']),
+                        "document_id": str(result['id']),
                         "filename": result['filename'],
                         "title": result['title'],
                         "source": result['source'],

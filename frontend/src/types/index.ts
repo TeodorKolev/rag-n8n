@@ -29,5 +29,7 @@ export interface User {
   email: string;
   role: string;
   department: Department;
+  first_name: string;
+  last_name: string;
 }
 

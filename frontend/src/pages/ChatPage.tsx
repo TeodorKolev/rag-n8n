@@ -17,6 +17,7 @@ import {
   FormControl,
   InputLabel,
   Select,
+  Tooltip,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -26,6 +27,8 @@ import {
   ThumbUp as ThumbUpIcon,
   ThumbDown as ThumbDownIcon,
   ContentCopy as CopyIcon,
+  Logout as LogoutIcon,
+  CloudUpload as UploadIcon,
 } from '@mui/icons-material';
 import { useMutation, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
@@ -34,6 +37,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 import { conversationService } from '../services/conversationService';
+import { useAuthStore } from '../stores/authStore';
+import { useNavigate } from 'react-router-dom';
 
 import { Message, Department } from '../types';
 import MessageSources from '../components/MessageSources';
@@ -46,12 +51,13 @@ interface ChatMessage extends Message {
 }
 
 const ChatPage: React.FC = () => {
-  const user = { department: 'general' as Department };
+  const { user, logout } = useAuthStore();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState<Department>(
-    (user?.department as Department) || 'general'
+    (user?.department as Department) ?? 'general'
   );
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -207,23 +213,43 @@ const ChatPage: React.FC = () => {
           <Typography variant="h5" component="h1">
             RAG Assistant Chat
           </Typography>
-          
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Department</InputLabel>
-            <Select
-              value={selectedDepartment}
-              label="Department"
-              onChange={(e) => setSelectedDepartment(e.target.value as Department)}
-            >
-              {DEPARTMENTS.map((dept) => (
-                <MenuItem key={dept} value={dept}>
-                  {dept.charAt(0).toUpperCase() + dept.slice(1)}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+
+          <Box display="flex" alignItems="center" gap={2}>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Department</InputLabel>
+              <Select
+                value={selectedDepartment}
+                label="Department"
+                onChange={(e) => setSelectedDepartment(e.target.value as Department)}
+              >
+                {DEPARTMENTS.map((dept) => (
+                  <MenuItem key={dept} value={dept}>
+                    {dept.charAt(0).toUpperCase() + dept.slice(1)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {user && (
+              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                {user.first_name} {user.last_name}
+              </Typography>
+            )}
+
+            <Tooltip title="Upload documents">
+              <IconButton size="small" onClick={() => navigate('/upload')} color="default">
+                <UploadIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Sign out">
+              <IconButton size="small" onClick={logout} color="default">
+                <LogoutIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Box>
-        
+
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           Ask questions about company policies, procedures, and documentation
         </Typography>

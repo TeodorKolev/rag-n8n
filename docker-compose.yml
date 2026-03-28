@@ -1,3 +1,11 @@
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# All sensitive values are read from a .env file (never committed).
+# Copy .env.example → .env and fill in real values before starting.
+# For production, replace the env_file approach with a secrets manager
+# (AWS Secrets Manager, HashiCorp Vault, Docker Swarm secrets, etc.) so that
+# secret values are not visible in `docker inspect` output.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
   # PostgreSQL Database
   postgres:

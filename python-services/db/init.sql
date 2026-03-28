@@ -124,15 +124,15 @@ CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
 INSERT INTO users (email, password_hash, first_name, last_name, role, department)
 VALUES (
     'admin@company.com',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO',
+    '$2b$12$AlaX7dJMw81geU8R.ivx1uo9NvctUtfUL9RTEretBOpGGzECe9BBi',
     'Admin', 'User', 'admin', 'general'
 ) ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO users (email, password_hash, first_name, last_name, role, department) VALUES
-    ('finance@company.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Finance', 'User', 'user', 'finance'),
-    ('care@company.com',    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Care',    'User', 'user', 'care'),
-    ('sales@company.com',  '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'Sales',   'User', 'user', 'sales'),
-    ('hr@company.com',     '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj1VhBqRwzLO', 'HR',      'User', 'user', 'hr')
+    ('finance@company.com', '$2b$12$AlaX7dJMw81geU8R.ivx1uo9NvctUtfUL9RTEretBOpGGzECe9BBi', 'Finance', 'User', 'user', 'finance'),
+    ('care@company.com',    '$2b$12$AlaX7dJMw81geU8R.ivx1uo9NvctUtfUL9RTEretBOpGGzECe9BBi', 'Care',    'User', 'user', 'care'),
+    ('sales@company.com',  '$2b$12$AlaX7dJMw81geU8R.ivx1uo9NvctUtfUL9RTEretBOpGGzECe9BBi', 'Sales',   'User', 'user', 'sales'),
+    ('hr@company.com',     '$2b$12$AlaX7dJMw81geU8R.ivx1uo9NvctUtfUL9RTEretBOpGGzECe9BBi', 'HR',      'User', 'user', 'hr')
 ON CONFLICT (email) DO NOTHING;
 
 -- Analytics views

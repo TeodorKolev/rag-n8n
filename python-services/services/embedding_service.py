@@ -4,12 +4,43 @@ Embedding generation service using OpenAI and other models
 
 import logging
 import asyncio
+from collections import OrderedDict
 from typing import List, Optional, Dict, Any
 import openai
 from sentence_transformers import SentenceTransformer
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+_CACHE_MAX_SIZE = 1000
+
+
+class _LRUCache:
+    """Bounded LRU cache — evicts the least-recently-used entry when full."""
+
+    def __init__(self, maxsize: int) -> None:
+        self._cache: OrderedDict = OrderedDict()
+        self._maxsize = maxsize
+
+    def get(self, key: str):
+        if key not in self._cache:
+            return None
+        self._cache.move_to_end(key)
+        return self._cache[key]
+
+    def set(self, key: str, value) -> None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            if len(self._cache) >= self._maxsize:
+                self._cache.popitem(last=False)  # evict LRU
+        self._cache[key] = value
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+    def __len__(self) -> int:
+        return len(self._cache)
 
 
 class EmbeddingService:
@@ -26,8 +57,8 @@ class EmbeddingService:
             openai.api_key = openai_api_key
             self.openai_client = openai.OpenAI(api_key=openai_api_key)
         
-        # Cache for embeddings to avoid regenerating
-        self.embedding_cache: Dict[str, List[float]] = {}
+        # ── Fix #8: bounded LRU cache — prevents unbounded memory growth ──────
+        self.embedding_cache = _LRUCache(_CACHE_MAX_SIZE)
         
         logger.info(f"Initialized EmbeddingService with model: {model_name}")
     
@@ -39,9 +70,10 @@ class EmbeddingService:
         
         # Check cache first
         cache_key = f"{self.model_name}:{hash(text)}"
-        if cache_key in self.embedding_cache:
+        cached = self.embedding_cache.get(cache_key)
+        if cached is not None:
             logger.debug("Using cached embedding")
-            return self.embedding_cache[cache_key]
+            return cached
         
         try:
             if self.model_name.startswith("text-embedding"):
@@ -52,7 +84,7 @@ class EmbeddingService:
                 embedding = await self._generate_sentence_transformer_embedding(text)
             
             # Cache the embedding
-            self.embedding_cache[cache_key] = embedding
+            self.embedding_cache.set(cache_key, embedding)
             
             return embedding
             
@@ -233,6 +265,7 @@ class EmbeddingService:
         """Get statistics about the embedding cache"""
         return {
             "cache_size": len(self.embedding_cache),
+            "cache_max_size": _CACHE_MAX_SIZE,
             "model_name": self.model_name,
-            "embedding_dimensions": self.get_embedding_dimensions()
+            "embedding_dimensions": self.get_embedding_dimensions(),
         }
